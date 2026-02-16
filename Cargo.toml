@@ -1,0 +1,19 @@
+[workspace]
+members = ["base", "example"]
+
+[package]
+name = "idea-demo"
+version = "0.1.0"
+edition = "2024"
+
+[package.metadata.rust-analyzer]
+rustc_private = true
+
+[dependencies]
+anyhow = "1"
+base.workspace = true
+eframe = "0.33.3"
+libloading = "0.9.0"
+
+[workspace.dependencies]
+base = { path = "base" }
