@@ -8,7 +8,7 @@ use std::{
     sync::atomic::{AtomicU64, Ordering},
 };
 
-use crate::{MeasureContext, Object, ObjectState, Size};
+use crate::{CursorIcon, MeasureContext, Object, ObjectState, Point, Size};
 
 
 
@@ -18,6 +18,11 @@ pub struct ObjectTree {
     nodes: HashMap<u64, Box<UnsafeCell<ObjectNode>>>,
     parents: HashMap<u64, Option<u64>>,
     size: Size,
+
+    pub(super) pointer_position: Option<Point>,
+    pub(super) pointer_capture_target: Option<u64>,
+    pub(super) hovered_path: Vec<u64>,
+    pub(super) cursor_icon: CursorIcon,
 }
 
 impl ObjectTree {
@@ -44,6 +49,10 @@ impl ObjectTree {
             nodes,
             parents,
             size: Size::ZERO,
+            pointer_position: None,
+            pointer_capture_target: None,
+            hovered_path: Vec::new(),
+            cursor_icon: CursorIcon::Default,
         };
 
         crate::update_pass(&mut this);
@@ -100,6 +109,13 @@ impl ObjectTree {
         }
     }
 
+    /// Get the current [cursor icon](CursorIcon) indicated by the
+    /// [objects](Object) in the tree.
+    #[inline]
+    pub const fn cursor_icon(&self) -> CursorIcon {
+        self.cursor_icon
+    }
+
     /// Get the current [visible size](Size) of the tree.
     #[inline]
     pub const fn size(&self) -> Size {
@@ -112,6 +128,84 @@ impl ObjectTree {
             return;
         }
         self.size = size;
+        crate::layout_pass(self, measure_context);
+        crate::update_pass(self);
+    }
+
+    /// Get a shared (immutable) reference to the [object](Object) instance with
+    /// the provided ID, if it exists.
+    pub fn find(&self, id: u64) -> Option<ObjectNodeRef<'_>> {
+        let parent_id = *self.parents.get(&id)?;
+        let node = unsafe { self.nodes.get(&id)?.get().as_ref()? };
+
+        Some(ObjectNodeRef {
+            parent_id,
+            object: &node.object,
+            state: &node.state,
+            children: ObjectChildrenRef {
+                parent_id: Some(id),
+                all_nodes: &self.nodes,
+                all_parents: &self.parents,
+            },
+        })
+    }
+
+    /// Get an exclusive (mutable) reference to the [object](Object) instance
+    /// with the provided ID, if it exists.
+    pub fn find_mut(&mut self, id: u64) -> Option<ObjectNodeMut<'_>> {
+        let parent_id = *self.parents.get(&id)?;
+        let node = unsafe { self.nodes.get(&id)?.get().as_mut()? };
+
+        Some(ObjectNodeMut {
+            parent_id,
+            object: &mut node.object,
+            state: &mut node.state,
+            children: ObjectChildrenMut {
+                parent_id: Some(id),
+                children: &mut node.children,
+                all_nodes: &mut self.nodes,
+                all_parents: &mut self.parents,
+            },
+        })
+    }
+
+    /// Get the path of object IDs from `id` to `start_id` (or the root ID if
+    /// `start_id` is `None`).
+    ///
+    /// The returned path will be in bottom-up order.
+    pub fn get_id_path(&self, id: u64, start_id: Option<u64>) -> Vec<u64> {
+        let mut path = Vec::new();
+
+        if !self.parents.contains_key(&id) {
+            return path;
+        }
+
+        let mut current_id = Some(id);
+        while let Some(current) = current_id {
+            path.push(current);
+            current_id = *self.parents.get(&current).unwrap();
+            if current_id == start_id {
+                break;
+            }
+        }
+
+        if current_id != start_id {
+            path.clear();
+        }
+
+        path
+    }
+
+    pub fn handle_pointer_move(
+        &mut self,
+        position: Option<Point>,
+        measure_context: &mut dyn MeasureContext,
+    ) {
+        if position == self.pointer_position {
+            return;
+        }
+        self.pointer_position = position;
+        crate::update_pointer_pass(self);
         crate::layout_pass(self, measure_context);
         crate::update_pass(self);
     }
@@ -131,8 +225,8 @@ pub struct ObjectNodeRef<'tree> {
     pub children: ObjectChildrenRef<'tree>,
 }
 
-impl ObjectNodeRef<'_> {
-    pub fn reborrow(&self) -> ObjectNodeRef<'_> {
+impl<'tree> ObjectNodeRef<'tree> {
+    pub fn reborrow(&self) -> ObjectNodeRef<'tree> {
         ObjectNodeRef {
             parent_id: self.parent_id,
             object: self.object,
@@ -141,6 +235,17 @@ impl ObjectNodeRef<'_> {
         }
     }
 }
+
+// impl<'tree> ObjectNodeRef<'tree> {
+//     pub fn reborrow_up(&self) -> ObjectNodeRef<'tree> {
+//         ObjectNodeRef {
+//             parent_id: self.parent_id,
+//             object: self.object,
+//             state: self.state,
+//             children: self.children.reborrow_up(),
+//         }
+//     }
+// }
 
 /// An exclusive (mutable) reference to an [object](Object) instance.
 pub struct ObjectNodeMut<'tree> {
@@ -178,7 +283,7 @@ pub struct ObjectChildrenRef<'tree> {
     all_parents: &'tree HashMap<u64, Option<u64>>,
 }
 
-impl ObjectChildrenRef<'_> {
+impl<'tree> ObjectChildrenRef<'tree> {
     pub fn has(&self, id: u64) -> bool {
         let child_id = id.into();
         let parent_id = self.parent_id;
@@ -188,7 +293,7 @@ impl ObjectChildrenRef<'_> {
             .is_some_and(|parent| *parent == parent_id)
     }
 
-    pub fn get(&self, id: u64) -> Option<ObjectNodeRef<'_>> {
+    pub fn get(&self, id: u64) -> Option<ObjectNodeRef<'tree>> {
         if self.has(id) {
             let parent_id = *self.all_parents.get(&id)?;
             let ObjectNode { object, state, .. } =
@@ -211,7 +316,7 @@ impl ObjectChildrenRef<'_> {
         }
     }
 
-    pub fn reborrow(&self) -> ObjectChildrenRef<'_> {
+    pub fn reborrow(&self) -> ObjectChildrenRef<'tree> {
         ObjectChildrenRef {
             parent_id: self.parent_id,
             all_nodes: self.all_nodes,

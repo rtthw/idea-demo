@@ -41,4 +41,8 @@ impl Object for TestingObject {
             .text_size("EXAMPLE", 30.0)
             .value_for_axis(axis)
     }
+
+    fn cursor_icon(&self) -> CursorIcon {
+        CursorIcon::IBeam
+    }
 }

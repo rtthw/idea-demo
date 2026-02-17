@@ -72,6 +72,7 @@ struct Program {
     source: String,
     known_size: Size,
     known_position: Point,
+    known_pointer_position: Option<Point>,
 }
 
 impl Program {
@@ -86,6 +87,7 @@ impl Program {
             source,
             known_size: Size::ZERO,
             known_position: Point::ZERO,
+            known_pointer_position: None,
         };
 
         this.start_compiling();
@@ -214,20 +216,6 @@ impl Program {
                 painter: ui.painter(),
             };
 
-            // TODO: Pass input events to object tree.
-            for event in ui.input(|i| {
-                i.filtered_events(&egui::EventFilter {
-                    tab: true,
-                    horizontal_arrows: true,
-                    vertical_arrows: true,
-                    escape: true,
-                })
-            }) {
-                match event {
-                    _ => {}
-                }
-            }
-
             let window_rect = ui.available_rect_before_wrap();
             let window_size = convert_vec2_to_size(window_rect.size());
             self.known_position = convert_pos2_to_point(window_rect.min);
@@ -239,6 +227,41 @@ impl Program {
                         egui_context: ui.ctx(),
                     },
                 );
+            }
+
+            for event in ui.input(|i| {
+                i.filtered_events(&egui::EventFilter {
+                    tab: true,
+                    horizontal_arrows: true,
+                    vertical_arrows: true,
+                    escape: true,
+                })
+            }) {
+                match event {
+                    egui::Event::PointerMoved(pos) => {
+                        let position = if window_rect.contains(pos) {
+                            Some(convert_pos2_to_point(pos) - self.known_position)
+                        } else {
+                            None
+                        };
+                        if self.known_pointer_position == position {
+                            continue;
+                        }
+                        self.known_pointer_position = position;
+                        tree.handle_pointer_move(
+                            position,
+                            &mut MeasureContextImpl {
+                                egui_context: ui.ctx(),
+                            },
+                        );
+                    }
+                    _ => {}
+                }
+            }
+
+            if ui.ui_contains_pointer() {
+                ui.ctx()
+                    .set_cursor_icon(convert_cursor_icon(tree.cursor_icon()));
             }
 
             render_pass(tree, &mut renderer);
@@ -325,6 +348,14 @@ const fn convert_size(size: Size) -> egui::Vec2 {
 #[inline(always)]
 const fn convert_color(rgba: Rgba) -> egui::Color32 {
     egui::Color32::from_rgba_premultiplied(rgba.r, rgba.g, rgba.b, rgba.a)
+}
+
+const fn convert_cursor_icon(icon: CursorIcon) -> egui::CursorIcon {
+    match icon {
+        CursorIcon::PointingHand => egui::CursorIcon::PointingHand,
+        CursorIcon::IBeam => egui::CursorIcon::Text,
+        _ => egui::CursorIcon::Default,
+    }
 }
 
 #[inline(always)]

@@ -7,7 +7,10 @@ mod object_tree;
 
 pub use {color::*, flex::*, math::*, object_tree::*};
 
-use std::any::{Any, TypeId};
+use std::{
+    any::{Any, TypeId},
+    collections::HashSet,
+};
 
 
 pub const OBJECT_TYPE_ID: TypeId = TypeId::of::<dyn Object>();
@@ -19,6 +22,14 @@ pub const OBJECT_TYPE_ID: TypeId = TypeId::of::<dyn Object>();
 /// *TODO: Document the instantiation process.*
 #[allow(unused)]
 pub trait Object: Any {
+    /// Whether this object can accept pointer events like hovering and
+    /// clicking.
+    ///
+    /// *Defaults to `true`.*
+    fn accepts_pointer_events(&self) -> bool {
+        true
+    }
+
     fn children_ids(&self) -> Vec<u64> {
         Vec::new()
     }
@@ -38,6 +49,12 @@ pub trait Object: Any {
         length_request: LengthRequest,
         cross_length: Option<f32>,
     ) -> f32;
+
+    fn cursor_icon(&self) -> CursorIcon {
+        CursorIcon::Default
+    }
+
+    fn on_hover(&mut self, pass: &mut EventPass<'_>, hovered: bool) {}
 }
 
 /// The current state of the [object](Object).
@@ -53,6 +70,9 @@ pub struct ObjectState {
     /// Whether the object's has had any child added or removed since the last
     /// update pass.
     children_changed: bool,
+
+    /// Whether this object is hovered by the user's mouse cursor.
+    hovered: bool,
 }
 
 impl ObjectState {
@@ -66,6 +86,8 @@ impl ObjectState {
 
             needs_layout: true,
             children_changed: true,
+
+            hovered: false,
         }
     }
 
@@ -78,6 +100,24 @@ impl ObjectState {
         self.needs_layout |= child_state.needs_layout;
         self.children_changed |= child_state.children_changed;
     }
+
+    fn contains_point(&self, point: Point) -> bool {
+        let max = self.layout_position + self.layout_size;
+        self.layout_position.x <= point.x
+            && self.layout_position.y <= point.y
+            && max.x > point.x
+            && max.y > point.y
+    }
+}
+
+
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum CursorIcon {
+    #[default]
+    Default,
+    PointingHand,
+    IBeam,
 }
 
 
@@ -102,10 +142,10 @@ impl UpdatePass<'_> {
 
 pub fn update_pass(tree: &mut ObjectTree) {
     let node = tree.root_node_mut();
-    update_element_tree(node);
+    update_object_tree(node);
 }
 
-fn update_element_tree(mut node: ObjectNodeMut<'_>) {
+fn update_object_tree(mut node: ObjectNodeMut<'_>) {
     let mut children = node.children;
     let object = &mut **node.object;
     let state = &mut node.state;
@@ -121,9 +161,9 @@ fn update_element_tree(mut node: ObjectNodeMut<'_>) {
         children: children.reborrow_mut(),
     });
 
-    // if state.newly_added {
-    //     state.newly_added = false;
-    //     object.on_build(&mut UpdatePass {
+    // if state.newly_instantiated {
+    //     state.newly_instantiated = false;
+    //     object.on_ready(&mut UpdatePass {
     //         state,
     //         children: children.reborrow_mut(),
     //     });
@@ -131,9 +171,194 @@ fn update_element_tree(mut node: ObjectNodeMut<'_>) {
 
     let parent_state = &mut *state;
     for_each_child_object(object, children, |mut node| {
-        update_element_tree(node.reborrow_mut());
+        update_object_tree(node.reborrow_mut());
         parent_state.merge_with_child(&node.state);
     });
+}
+
+
+
+pub struct EventPass<'tree> {
+    state: &'tree mut ObjectState,
+    children: ObjectChildrenMut<'tree>,
+    handled: bool,
+}
+
+fn event_pass(
+    tree: &mut ObjectTree,
+    target: Option<u64>,
+    mut callback: impl FnMut(&mut dyn Object, &mut EventPass<'_>),
+) {
+    let mut target_id = target;
+    let mut handled = false;
+    while let Some(node_id) = target_id {
+        let parent_id = {
+            let mut node = tree
+                .find_mut(node_id)
+                .expect("invalid object ID for event target");
+
+            if !handled {
+                let mut pass = EventPass {
+                    state: &mut node.state,
+                    children: node.children,
+                    handled: false,
+                };
+                callback(&mut **node.object, &mut pass);
+
+                handled = pass.handled;
+            }
+
+            node.parent_id
+        };
+
+        if let Some(parent_id) = parent_id {
+            let mut parent_node = tree.find_mut(parent_id).unwrap();
+            let node = parent_node.children.get_mut(node_id).unwrap();
+
+            parent_node.state.merge_with_child(&node.state);
+        }
+
+        target_id = parent_id;
+    }
+}
+
+fn single_event_pass(
+    tree: &mut ObjectTree,
+    target: Option<u64>,
+    mut callback: impl FnMut(&mut dyn Object, &mut EventPass<'_>),
+) {
+    let Some(target) = target else {
+        return;
+    };
+
+    let mut node = tree
+        .find_mut(target)
+        .expect("invalid object ID passed to single_event_pass");
+
+    let mut pass = EventPass {
+        state: &mut node.state,
+        children: node.children,
+        handled: false,
+    };
+    callback(&mut **node.object, &mut pass);
+
+    let mut current_id = Some(target);
+    while let Some(node_id) = current_id {
+        let parent_id = tree
+            .find_mut(node_id)
+            .expect("invalid object ID for pointer target")
+            .parent_id;
+        if let Some(parent_id) = parent_id {
+            let mut parent_node = tree.find_mut(parent_id).unwrap();
+            let node = parent_node.children.get_mut(node_id).unwrap();
+
+            parent_node.state.merge_with_child(&node.state);
+        }
+
+        current_id = parent_id;
+    }
+}
+
+fn update_pointer_pass(tree: &mut ObjectTree) {
+    let next_hovered_object = tree
+        .pointer_position
+        .and_then(|pos| find_pointer_target(tree.root_node(), pos))
+        .map(|node| node.state.id());
+    let next_hovered_path =
+        next_hovered_object.map_or(Vec::new(), |node_id| tree.get_id_path(node_id, None));
+    let prev_hovered_path = std::mem::take(&mut tree.hovered_path);
+    let prev_hovered_object = prev_hovered_path.first().copied();
+
+    if prev_hovered_path != next_hovered_path {
+        let mut hovered_set = HashSet::new();
+        for node_id in &next_hovered_path {
+            hovered_set.insert(*node_id);
+        }
+
+        for node_id in prev_hovered_path.iter().copied() {
+            if tree
+                .find_mut(node_id)
+                .map(|node| node.state.hovered != hovered_set.contains(&node_id))
+                .unwrap_or(false)
+            {
+                let hovered = hovered_set.contains(&node_id);
+                event_pass(tree, Some(node_id), |_object, pass| {
+                    // if pass.state.hovered != hovered {
+                    //     object.on_child_hover(pass, hovered);
+                    // }
+                    pass.state.hovered = hovered;
+                });
+            }
+        }
+        for node_id in next_hovered_path.iter().copied() {
+            if tree
+                .find_mut(node_id)
+                .map(|node| node.state.hovered != hovered_set.contains(&node_id))
+                .unwrap_or(false)
+            {
+                let hovered = hovered_set.contains(&node_id);
+                event_pass(tree, Some(node_id), |_object, pass| {
+                    // if pass.state.hovered != hovered {
+                    //     object.on_child_hover(pass, hovered);
+                    // }
+                    pass.state.hovered = hovered;
+                });
+            }
+        }
+    }
+
+    if prev_hovered_object != next_hovered_object {
+        single_event_pass(tree, prev_hovered_object, |object, pass| {
+            pass.state.hovered = false;
+            object.on_hover(pass, false);
+        });
+        single_event_pass(tree, next_hovered_object, |object, pass| {
+            pass.state.hovered = true;
+            object.on_hover(pass, true);
+        });
+    }
+
+    let next_cursor_icon =
+        if let Some(node_id) = tree.pointer_capture_target.or(next_hovered_object) {
+            let node = tree
+                .find_mut(node_id)
+                .expect("failed to find the object tree's hover target");
+
+            node.object.cursor_icon()
+        } else {
+            CursorIcon::Default
+        };
+
+    tree.cursor_icon = next_cursor_icon;
+    tree.hovered_path = next_hovered_path;
+}
+
+fn find_pointer_target<'tree>(
+    node: ObjectNodeRef<'tree>,
+    position: Point,
+) -> Option<ObjectNodeRef<'tree>> {
+    if !node.state.contains_point(position) {
+        return None;
+    }
+
+    for child_id in node.object.children_ids().iter().rev() {
+        if let Some(child) = find_pointer_target(
+            node.children
+                .reborrow()
+                .get(*child_id)
+                .expect("passed invalid child ID to find_pointer_target"),
+            position,
+        ) {
+            return Some(child);
+        }
+    }
+
+    if node.object.accepts_pointer_events() {
+        // && ctx.size().to_rect().contains(local_pos) {
+        Some(node)
+    } else {
+        None
+    }
 }
 
 
@@ -341,6 +566,7 @@ macro_rules! multi_impl {
 
 // Types with a `state: &mut ObjectState` field.
 multi_impl! {
+    EventPass<'_>,
     LayoutPass<'_>,
     MeasurePass<'_>,
     RenderPass<'_>,
@@ -369,6 +595,7 @@ multi_impl! {
 
 // Types with a `children: ObjectChildrenMut` field.
 multi_impl! {
+    EventPass<'_>,
     LayoutPass<'_>,
     MeasurePass<'_>,
     UpdatePass<'_>,
