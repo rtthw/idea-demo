@@ -13,6 +13,7 @@ rustc_private = true
 anyhow = "1"
 base.workspace = true
 eframe = "0.33.3"
+image = { version = "0.25.9", features = ["png"] }
 libloading = "0.9.0"
 
 [workspace.dependencies]

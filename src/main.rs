@@ -18,7 +18,10 @@ use {
     anyhow::Result,
     base::*,
     eframe::egui,
-    std::sync::{Arc, atomic::AtomicBool},
+    std::{
+        collections::HashMap,
+        sync::{Arc, atomic::AtomicBool},
+    },
 };
 
 
@@ -31,9 +34,9 @@ fn main() -> Result<()> {
         eframe::NativeOptions {
             ..Default::default()
         },
-        Box::new(|_cc| {
+        Box::new(|cc| {
             Ok(Box::new(App {
-                program: Program::load("example", EXAMPLE_SRC.to_string())?,
+                program: Program::load("example", EXAMPLE_SRC.to_string(), cc.egui_ctx.clone())?,
             }))
         }),
     )
@@ -70,13 +73,14 @@ struct Program {
     compiling: Arc<AtomicBool>,
     latest_compile_succeeded: Arc<AtomicBool>,
     source: String,
+    egui_context: egui::Context,
     known_size: Size,
     known_position: Point,
     known_pointer_position: Option<Point>,
 }
 
 impl Program {
-    fn load(name: &'static str, source: String) -> Result<Self> {
+    fn load(name: &'static str, source: String, egui_context: egui::Context) -> Result<Self> {
         let mut this = Self {
             name,
             handle: None,
@@ -85,6 +89,7 @@ impl Program {
             compiling: Arc::new(AtomicBool::new(false)),
             latest_compile_succeeded: Arc::new(AtomicBool::new(true)),
             source,
+            egui_context,
             known_size: Size::ZERO,
             known_position: Point::ZERO,
             known_pointer_position: None,
@@ -126,14 +131,22 @@ impl Program {
                 format!("{WORKSPACE_DIR}/target/debug/{}.so", self.name).as_str(),
             )?
         };
-        let view_fn =
-            unsafe { handle.get::<unsafe extern "Rust" fn() -> Box<dyn Object>>(b"view") }?;
-        let root_object = unsafe { (&*view_fn)() };
+        let mut textures = HashMap::new();
+        let view_fn = unsafe {
+            handle.get::<unsafe extern "Rust" fn(&mut dyn ViewContext) -> Box<dyn Object>>(b"view")
+        }?;
+        let root_object = unsafe {
+            (&*view_fn)(&mut ViewContextImpl {
+                egui_context: &self.egui_context,
+                textures: &mut textures,
+            })
+        };
 
         let tree = ObjectTree::new(root_object);
 
         self.handle = Some(ProgramHandle {
             tree,
+            _textures: textures,
             _handle: handle,
         });
 
@@ -273,10 +286,42 @@ impl Program {
 
 struct ProgramHandle {
     tree: ObjectTree,
+    _textures: HashMap<String, egui::TextureHandle>,
     _handle: libloading::Library,
 }
 
 
+
+struct ViewContextImpl<'pass> {
+    textures: &'pass mut HashMap<String, egui::TextureHandle>,
+    egui_context: &'pass egui::Context,
+}
+
+impl ViewContext for ViewContextImpl<'_> {
+    fn load_texture(&mut self, path: &str) -> u64 {
+        let egui::TextureId::Managed(id) = self
+            .textures
+            .entry(path.to_string())
+            .or_insert_with(|| {
+                let image = image::ImageReader::open(path).unwrap().decode().unwrap();
+                let size = [image.width() as _, image.height() as _];
+                let image_buffer = image.to_rgba8();
+                let pixels = image_buffer.as_flat_samples();
+
+                self.egui_context.load_texture(
+                    path,
+                    egui::ColorImage::from_rgba_unmultiplied(size, pixels.as_slice()),
+                    egui::TextureOptions::LINEAR,
+                )
+            })
+            .id()
+        else {
+            unreachable!("load_texture should only produce managed IDs")
+        };
+
+        id
+    }
+}
 
 struct RendererImpl<'pass> {
     position: Point,
@@ -301,6 +346,15 @@ impl Renderer for RendererImpl<'_> {
             convert_color(color),
             egui::Stroke::NONE,
             egui::StrokeKind::Inside,
+        );
+    }
+
+    fn image(&mut self, texture_id: u64, position: Point, size: Size) {
+        self.painter.image(
+            egui::TextureId::Managed(texture_id),
+            egui::Rect::from_min_size(convert_point(self.position + position), convert_size(size)),
+            egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+            egui::Color32::WHITE,
         );
     }
 }

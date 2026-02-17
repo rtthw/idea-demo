@@ -122,6 +122,12 @@ pub enum CursorIcon {
 
 
 
+pub trait ViewContext {
+    fn load_texture(&mut self, path: &str) -> u64;
+}
+
+
+
 pub struct UpdatePass<'tree> {
     state: &'tree mut ObjectState,
     children: ObjectChildrenMut<'tree>,
@@ -391,6 +397,7 @@ pub struct RenderPass<'tree> {
 pub trait Renderer {
     fn text(&mut self, content: &str, position: Point, font_size: f32, color: Rgba);
     fn quad(&mut self, position: Point, size: Size, color: Rgba);
+    fn image(&mut self, texture_id: u64, position: Point, size: Size);
 }
 
 

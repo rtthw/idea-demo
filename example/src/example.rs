@@ -10,21 +10,25 @@ use base::*;
 
 
 #[unsafe(no_mangle)]
-pub extern "Rust" fn view() -> Box<dyn Object> {
+pub extern "Rust" fn view(context: &mut dyn ViewContext) -> Box<dyn Object> {
+    let texture_id = context.load_texture("res/light.png");
     Box::new(
         Flex::column()
-            .with(TestingObject {}, 0.0)
-            .with(TestingObject {}, 0.0),
+            .with(TestingObject { texture_id }, 0.0)
+            .with(TestingObject { texture_id }, 0.0),
     )
 }
 
 
 
-struct TestingObject {}
+struct TestingObject {
+    texture_id: u64,
+}
 
 impl Object for TestingObject {
     fn render(&self, pass: &mut RenderPass<'_>, renderer: &mut dyn Renderer) {
         renderer.quad(pass.position(), pass.size(), Rgba::BLACK);
+        renderer.image(self.texture_id, pass.position(), pass.size());
         renderer.text("EXAMPLE", pass.position(), 30.0, Rgba::WHITE);
     }
 
