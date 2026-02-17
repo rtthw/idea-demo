@@ -165,6 +165,7 @@ pub struct RenderPass<'tree> {
 
 pub trait Renderer {
     fn text(&mut self, content: &str, position: Point, font_size: f32, color: Rgba);
+    fn quad(&mut self, position: Point, size: Size, color: Rgba);
 }
 
 
@@ -188,6 +189,8 @@ fn layout_object(
         return;
     }
     state.needs_layout = false;
+
+    state.layout_size = size;
 
     object.layout(&mut LayoutPass {
         state,
@@ -351,6 +354,11 @@ multi_impl! {
         #[inline]
         pub fn position(&self) -> Point {
             self.state.layout_position
+        }
+
+        #[inline]
+        pub fn size(&self) -> Size {
+            self.state.layout_size
         }
 
         pub fn request_layout(&mut self) {

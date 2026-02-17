@@ -150,6 +150,8 @@ impl Program {
             .latest_compile_succeeded
             .load(std::sync::atomic::Ordering::Relaxed);
 
+        let recompiled = self.waiting_on_recompile && compile_success;
+
         if self.waiting_on_recompile && compile_success {
             self.waiting_on_recompile = false;
             self.reload()?;
@@ -229,9 +231,14 @@ impl Program {
             let window_rect = ui.available_rect_before_wrap();
             let window_size = convert_vec2_to_size(window_rect.size());
             self.known_position = convert_pos2_to_point(window_rect.min);
-            if self.known_size != window_size {
+            if self.known_size != window_size || recompiled {
                 self.known_size = window_size;
-                tree.resize(window_size);
+                tree.resize(
+                    window_size,
+                    &mut MeasureContextImpl {
+                        egui_context: ui.ctx(),
+                    },
+                );
             }
 
             render_pass(tree, &mut renderer);
@@ -263,6 +270,38 @@ impl Renderer for RendererImpl<'_> {
             convert_color(color),
         );
     }
+
+    fn quad(&mut self, position: Point, size: Size, color: Rgba) {
+        self.painter.rect(
+            egui::Rect::from_min_size(convert_point(self.position + position), convert_size(size)),
+            0,
+            convert_color(color),
+            egui::Stroke::NONE,
+            egui::StrokeKind::Inside,
+        );
+    }
+}
+
+struct MeasureContextImpl<'pass> {
+    egui_context: &'pass egui::Context,
+}
+
+impl MeasureContext for MeasureContextImpl<'_> {
+    fn text_size(&mut self, content: &str, font_size: f32) -> Size {
+        convert_vec2_to_size(
+            self.egui_context
+                .fonts_mut(|f| {
+                    f.layout(
+                        content.to_string(),
+                        egui::FontId::proportional(font_size),
+                        egui::Color32::WHITE,
+                        f32::INFINITY,
+                    )
+                })
+                .rect
+                .size(),
+        )
+    }
 }
 
 
@@ -272,6 +311,14 @@ const fn convert_point(point: Point) -> egui::Pos2 {
     egui::Pos2 {
         x: point.x,
         y: point.y,
+    }
+}
+
+#[inline(always)]
+const fn convert_size(size: Size) -> egui::Vec2 {
+    egui::Vec2 {
+        x: size.width,
+        y: size.height,
     }
 }
 

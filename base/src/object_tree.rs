@@ -8,7 +8,7 @@ use std::{
     sync::atomic::{AtomicU64, Ordering},
 };
 
-use crate::{Object, ObjectState, Size};
+use crate::{MeasureContext, Object, ObjectState, Size};
 
 
 
@@ -107,12 +107,12 @@ impl ObjectTree {
     }
 
     /// Resize the tree to the provided [size](Size).
-    pub fn resize(&mut self, size: Size) {
+    pub fn resize(&mut self, size: Size, measure_context: &mut dyn MeasureContext) {
         if size == self.size {
             return;
         }
         self.size = size;
-        crate::layout_pass(self, &mut ());
+        crate::layout_pass(self, measure_context);
         crate::update_pass(self);
     }
 }

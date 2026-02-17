@@ -11,7 +11,11 @@ use base::*;
 
 #[unsafe(no_mangle)]
 pub extern "Rust" fn view() -> Box<dyn Object> {
-    Box::new(TestingObject {})
+    Box::new(
+        Flex::column()
+            .with(TestingObject {}, 0.0)
+            .with(TestingObject {}, 0.0),
+    )
 }
 
 
@@ -20,6 +24,7 @@ struct TestingObject {}
 
 impl Object for TestingObject {
     fn render(&self, pass: &mut RenderPass<'_>, renderer: &mut dyn Renderer) {
+        renderer.quad(pass.position(), pass.size(), Rgba::BLACK);
         renderer.text("EXAMPLE", pass.position(), 30.0, Rgba::WHITE);
     }
 
