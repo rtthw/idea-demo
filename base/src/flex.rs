@@ -158,7 +158,7 @@ impl Object for Flex {
                 pass.place_child(child, child_origin);
 
                 let child_node = pass.expect_child(child.id());
-                let child_size = child_node.state.layout_size;
+                let child_size = child_node.state.layout_area.size;
                 let child_baseline = child_node.state.layout_baseline_offset;
                 let child_bottom = child_origin.y + child_size.height;
                 let bottom_gap = size.height - child_bottom;
@@ -282,7 +282,7 @@ impl Object for Flex {
                     }
 
                     let child_node = pass.expect_child(object.id());
-                    let child_size = child_node.state.layout_size;
+                    let child_size = child_node.state.layout_area.size;
                     let alignment = alignment.unwrap_or(self.cross_alignment);
                     let child_origin_cross = match alignment {
                         CrossAlignment::Baseline if main_axis == Axis::Horizontal => {

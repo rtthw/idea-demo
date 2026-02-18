@@ -62,8 +62,9 @@ pub trait Object: Any {
 pub struct ObjectState {
     id: u64,
 
-    layout_position: Point,
-    layout_size: Size,
+    global_position: Point,
+
+    layout_area: Area,
     layout_baseline_offset: f32,
 
     /// Whether the object needs to be re-laid out.
@@ -81,8 +82,9 @@ impl ObjectState {
         Self {
             id,
 
-            layout_position: Point::ZERO,
-            layout_size: Size::ZERO,
+            global_position: Point::ZERO,
+
+            layout_area: Area::ZERO,
             layout_baseline_offset: 0.0,
 
             needs_layout: true,
@@ -97,17 +99,14 @@ impl ObjectState {
         self.id
     }
 
+    #[inline]
+    pub const fn area(&self) -> Area {
+        Area::new(self.global_position, self.layout_area.size)
+    }
+
     fn merge_with_child(&mut self, child_state: &Self) {
         self.needs_layout |= child_state.needs_layout;
         self.children_changed |= child_state.children_changed;
-    }
-
-    fn contains_point(&self, point: Point) -> bool {
-        let max = self.layout_position + self.layout_size;
-        self.layout_position.x <= point.x
-            && self.layout_position.y <= point.y
-            && max.x > point.x
-            && max.y > point.y
     }
 }
 
@@ -344,7 +343,7 @@ fn find_pointer_target<'tree>(
     node: ObjectNodeRef<'tree>,
     position: Point,
 ) -> Option<ObjectNodeRef<'tree>> {
-    if !node.state.contains_point(position) {
+    if !node.state.area().contains(position) {
         return None;
     }
 
@@ -361,7 +360,6 @@ fn find_pointer_target<'tree>(
     }
 
     if node.object.accepts_pointer_events() {
-        // && ctx.size().to_rect().contains(local_pos) {
         Some(node)
     } else {
         None
@@ -423,7 +421,7 @@ fn layout_object(
     }
     state.needs_layout = false;
 
-    state.layout_size = size;
+    state.layout_area.size = size;
 
     object.layout(&mut LayoutPass {
         state,
@@ -438,7 +436,7 @@ fn place_object(state: &mut ObjectState, position: Point) {
     //     state.transformed = true;
     // }
 
-    state.layout_position = position;
+    state.layout_area.position = position;
 }
 
 pub struct LayoutPass<'tree> {
@@ -586,13 +584,18 @@ multi_impl! {
         }
 
         #[inline]
-        pub fn position(&self) -> Point {
-            self.state.layout_position
+        pub const fn area(&self) -> Area {
+            Area::new(self.state.global_position, self.state.layout_area.size)
+        }
+
+        #[inline]
+        pub const fn position(&self) -> Point {
+            self.state.global_position
         }
 
         #[inline]
         pub fn size(&self) -> Size {
-            self.state.layout_size
+            self.state.layout_area.size
         }
 
         pub fn request_layout(&mut self) {

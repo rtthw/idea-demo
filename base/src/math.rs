@@ -36,6 +36,31 @@ impl Axis {
 
 
 #[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Area {
+    pub position: Point,
+    pub size: Size,
+}
+
+impl Area {
+    pub const ZERO: Self = Self::new(Point::ZERO, Size::ZERO);
+
+    #[inline]
+    pub const fn new(position: Point, size: Size) -> Self {
+        Self { position, size }
+    }
+
+    pub const fn contains(&self, point: Point) -> bool {
+        let max = self.position.add_size(self.size);
+        self.position.x <= point.x
+            && self.position.y <= point.y
+            && max.x > point.x
+            && max.y > point.y
+    }
+}
+
+
+
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Size {
     pub width: f32,
     pub height: f32,
@@ -60,6 +85,7 @@ impl Size {
 impl Add for Size {
     type Output = Self;
 
+    #[inline]
     fn add(self, rhs: Self) -> Self::Output {
         Self {
             width: self.width + rhs.width,
@@ -84,10 +110,19 @@ impl Point {
         Self { x, y }
     }
 
+    #[inline]
     pub const fn value_for_axis(&self, axis: Axis) -> f32 {
         match axis {
             Axis::Horizontal => self.x,
             Axis::Vertical => self.y,
+        }
+    }
+
+    #[inline]
+    pub const fn add_size(&self, size: Size) -> Self {
+        Self {
+            x: self.x + size.width,
+            y: self.y + size.height,
         }
     }
 }
@@ -95,6 +130,7 @@ impl Point {
 impl Add for Point {
     type Output = Self;
 
+    #[inline]
     fn add(self, rhs: Self) -> Self::Output {
         Self {
             x: self.x + rhs.x,
@@ -106,6 +142,7 @@ impl Add for Point {
 impl Sub for Point {
     type Output = Self;
 
+    #[inline]
     fn sub(self, rhs: Self) -> Self::Output {
         Self {
             x: self.x - rhs.x,
@@ -117,6 +154,7 @@ impl Sub for Point {
 impl Add<Size> for Point {
     type Output = Self;
 
+    #[inline]
     fn add(self, rhs: Size) -> Self::Output {
         Self {
             x: self.x + rhs.width,
