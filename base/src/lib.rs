@@ -2,10 +2,11 @@
 
 mod color;
 mod flex;
+mod label;
 mod math;
 mod object_tree;
 
-pub use {color::*, flex::*, math::*, object_tree::*};
+pub use {color::*, flex::*, label::*, math::*, object_tree::*};
 
 use std::{
     any::{Any, TypeId},
@@ -44,7 +45,7 @@ pub trait Object: Any {
 
     fn measure(
         &mut self,
-        context: &mut MeasurePass<'_>,
+        pass: &mut MeasurePass<'_>,
         axis: Axis,
         length_request: LengthRequest,
         cross_length: Option<f32>,

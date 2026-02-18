@@ -14,6 +14,11 @@ pub extern "Rust" fn view(context: &mut dyn ViewContext) -> Box<dyn Object> {
     let texture_id = context.load_texture("res/light.png");
     Box::new(
         Flex::column()
+            .with(
+                Label::new("Something").color(Rgba::rgb(0x73, 0x73, 0x89)),
+                0.0,
+            )
+            .with(Label::new("Another").font_size(40.0), 0.0)
             .with(TestingObject { texture_id }, 0.0)
             .with(TestingObject { texture_id }, 0.0),
     )
