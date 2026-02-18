@@ -32,6 +32,10 @@ fn main() -> Result<()> {
     eframe::run_native(
         "Demo",
         eframe::NativeOptions {
+            viewport: egui::ViewportBuilder {
+                inner_size: Some(egui::vec2(1200.0, 800.0)),
+                ..Default::default()
+            },
             ..Default::default()
         },
         Box::new(|cc| {
@@ -172,36 +176,10 @@ impl Program {
             self.reload()?;
         }
 
-        egui::Frame::group(ui.style()).show(ui, |ui| {
-            ui.set_width(ui.available_width());
-            ui.set_height(ui.available_height());
+        ui.set_width(ui.available_width());
+        ui.set_height(ui.available_height());
 
-            if self.editing {
-                ui.allocate_ui_with_layout(
-                    egui::vec2(
-                        ui.available_size_before_wrap().x,
-                        ui.spacing().interact_size.y,
-                    ),
-                    egui::Layout::right_to_left(egui::Align::Center).with_main_wrap(true),
-                    |ui| {
-                        if ui.button("Confirm").clicked() {
-                            self.editing = false;
-                            self.start_compiling();
-                        }
-                        if ui.button("Cancel").clicked() {
-                            self.editing = false;
-                        }
-                    },
-                );
-                ui.separator();
-                ui.add(
-                    egui::TextEdit::multiline(&mut self.source)
-                        .code_editor()
-                        .font(egui::FontId::monospace(20.0))
-                        .desired_width(ui.available_width()),
-                );
-                return;
-            }
+        if self.editing {
             ui.allocate_ui_with_layout(
                 egui::vec2(
                     ui.available_size_before_wrap().x,
@@ -209,104 +187,143 @@ impl Program {
                 ),
                 egui::Layout::right_to_left(egui::Align::Center).with_main_wrap(true),
                 |ui| {
-                    if ui.button("Edit").clicked() {
-                        self.editing = true;
+                    if ui.button("Confirm").clicked() {
+                        self.editing = false;
+                        self.start_compiling();
+                    }
+                    if ui.button("Cancel").clicked() {
+                        self.editing = false;
                     }
                 },
             );
             ui.separator();
-            if !compile_success {
-                ui.centered_and_justified(|ui| {
-                    ui.heading("Compilation failed, see logs");
-                });
-                return;
-            }
 
-            let handle = self.handle.as_mut().unwrap();
-            let tree = &mut handle.tree;
-            let mut renderer = RendererImpl {
-                position: self.known_position,
-                painter: ui.painter(),
+            let mut layouter = |ui: &egui::Ui, text: &dyn egui::TextBuffer, wrap_width: f32| {
+                let mut layout_job: egui::text::LayoutJob =
+                    egui_extras::syntax_highlighting::highlight(
+                        ui.ctx(),
+                        ui.style(),
+                        &egui_extras::syntax_highlighting::CodeTheme::dark(16.0),
+                        text.as_str(),
+                        "rs",
+                    );
+                layout_job.wrap.max_width = wrap_width;
+
+                ui.fonts_mut(|f| f.layout_job(layout_job))
             };
+            ui.add(
+                egui::TextEdit::multiline(&mut self.source)
+                    .layouter(&mut layouter)
+                    .desired_width(ui.available_width()),
+            );
 
-            let window_rect = ui.available_rect_before_wrap();
-            let window_size = convert_vec2_to_size(window_rect.size());
-            self.known_position = convert_pos2_to_point(window_rect.min);
-            if self.known_size != window_size || recompiled {
-                self.known_size = window_size;
-                tree.resize(
-                    window_size,
-                    &mut MeasureContextImpl {
-                        egui_context: ui.ctx(),
-                    },
-                );
-            }
+            return Ok(());
+        }
 
-            for event in ui.input(|i| {
-                i.filtered_events(&egui::EventFilter {
-                    tab: true,
-                    horizontal_arrows: true,
-                    vertical_arrows: true,
-                    escape: true,
-                })
-            }) {
-                match event {
-                    egui::Event::PointerMoved(pos) => {
-                        let position = if window_rect.contains(pos) {
-                            Some(convert_pos2_to_point(pos) - self.known_position)
-                        } else {
-                            None
-                        };
-                        if self.known_pointer_position == position {
-                            continue;
-                        }
-                        self.known_pointer_position = position;
-                        tree.handle_pointer_event(
-                            PointerEvent::Move { position },
-                            &mut MeasureContextImpl {
-                                egui_context: ui.ctx(),
-                            },
-                        );
-                    }
-                    egui::Event::PointerButton {
-                        pos,
-                        button,
-                        pressed,
-                        ..
-                    } => {
-                        if !window_rect.contains(pos) {
-                            continue;
-                        }
-                        let button = match button {
-                            egui::PointerButton::Primary => PointerButton::Primary,
-                            egui::PointerButton::Secondary => PointerButton::Secondary,
-                            egui::PointerButton::Middle => PointerButton::Auxiliary,
-                            egui::PointerButton::Extra1 => PointerButton::Back,
-                            egui::PointerButton::Extra2 => PointerButton::Forward,
-                        };
-                        let event = if pressed {
-                            PointerEvent::Down { button }
-                        } else {
-                            PointerEvent::Up { button }
-                        };
-                        tree.handle_pointer_event(
-                            event,
-                            &mut MeasureContextImpl {
-                                egui_context: ui.ctx(),
-                            },
-                        );
-                    }
-                    _ => {}
+        ui.allocate_ui_with_layout(
+            egui::vec2(
+                ui.available_size_before_wrap().x,
+                ui.spacing().interact_size.y,
+            ),
+            egui::Layout::right_to_left(egui::Align::Center).with_main_wrap(true),
+            |ui| {
+                if ui.button("Edit").clicked() {
+                    self.editing = true;
                 }
-            }
+            },
+        );
+        ui.separator();
+        if !compile_success {
+            ui.centered_and_justified(|ui| {
+                ui.heading("Compilation failed, see logs");
+            });
+            return Ok(());
+        }
 
-            if ui.ui_contains_pointer() {
-                ui.ctx()
-                    .set_cursor_icon(convert_cursor_icon(tree.cursor_icon()));
-            }
+        let handle = self.handle.as_mut().unwrap();
+        let tree = &mut handle.tree;
+        let mut renderer = RendererImpl {
+            position: self.known_position,
+            painter: ui.painter(),
+        };
 
-            render_pass(tree, &mut renderer);
-        });
+        let window_rect = ui.available_rect_before_wrap();
+        let window_size = convert_vec2_to_size(window_rect.size());
+        self.known_position = convert_pos2_to_point(window_rect.min);
+        if self.known_size != window_size || recompiled {
+            self.known_size = window_size;
+            tree.resize(
+                window_size,
+                &mut MeasureContextImpl {
+                    egui_context: ui.ctx(),
+                },
+            );
+        }
+
+        for event in ui.input(|i| {
+            i.filtered_events(&egui::EventFilter {
+                tab: true,
+                horizontal_arrows: true,
+                vertical_arrows: true,
+                escape: true,
+            })
+        }) {
+            match event {
+                egui::Event::PointerMoved(pos) => {
+                    let position = if window_rect.contains(pos) {
+                        Some(convert_pos2_to_point(pos) - self.known_position)
+                    } else {
+                        None
+                    };
+                    if self.known_pointer_position == position {
+                        continue;
+                    }
+                    self.known_pointer_position = position;
+                    tree.handle_pointer_event(
+                        PointerEvent::Move { position },
+                        &mut MeasureContextImpl {
+                            egui_context: ui.ctx(),
+                        },
+                    );
+                }
+                egui::Event::PointerButton {
+                    pos,
+                    button,
+                    pressed,
+                    ..
+                } => {
+                    if !window_rect.contains(pos) {
+                        continue;
+                    }
+                    let button = match button {
+                        egui::PointerButton::Primary => PointerButton::Primary,
+                        egui::PointerButton::Secondary => PointerButton::Secondary,
+                        egui::PointerButton::Middle => PointerButton::Auxiliary,
+                        egui::PointerButton::Extra1 => PointerButton::Back,
+                        egui::PointerButton::Extra2 => PointerButton::Forward,
+                    };
+                    let event = if pressed {
+                        PointerEvent::Down { button }
+                    } else {
+                        PointerEvent::Up { button }
+                    };
+                    tree.handle_pointer_event(
+                        event,
+                        &mut MeasureContextImpl {
+                            egui_context: ui.ctx(),
+                        },
+                    );
+                }
+                _ => {}
+            }
+        }
+
+        if ui.ui_contains_pointer() {
+            ui.ctx()
+                .set_cursor_icon(convert_cursor_icon(tree.cursor_icon()));
+        }
+
+        render_pass(tree, &mut renderer);
 
         Ok(())
     }
