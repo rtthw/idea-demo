@@ -19,6 +19,7 @@ use {
     base::*,
     eframe::egui,
     std::{
+        any::TypeId,
         collections::HashMap,
         sync::{Arc, atomic::AtomicBool},
     },
@@ -135,6 +136,10 @@ impl Program {
                 format!("{WORKSPACE_DIR}/target/debug/{}.so", self.name).as_str(),
             )?
         };
+
+        let object_type_id = unsafe { handle.get::<*const TypeId>(b"__OBJECT_TYPE_ID")? };
+        assert_eq!(unsafe { **object_type_id }, TypeId::of::<dyn Object>());
+
         let mut textures = HashMap::new();
         let view_fn = unsafe {
             handle.get::<unsafe extern "Rust" fn(&mut dyn ViewContext) -> Box<dyn Object>>(b"view")

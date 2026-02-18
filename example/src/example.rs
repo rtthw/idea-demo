@@ -5,9 +5,13 @@
 
 extern crate base;
 
+use std::any::TypeId;
+
 use base::*;
 
 
+#[unsafe(no_mangle)]
+pub static __OBJECT_TYPE_ID: TypeId = OBJECT_TYPE_ID;
 
 #[unsafe(no_mangle)]
 pub extern "Rust" fn view(context: &mut dyn ViewContext) -> Box<dyn Object> {
