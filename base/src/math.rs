@@ -138,6 +138,18 @@ impl Add for Size {
     }
 }
 
+impl Mul for Size {
+    type Output = Self;
+
+    #[inline]
+    fn mul(self, rhs: Self) -> Self::Output {
+        Self {
+            width: self.width * rhs.width,
+            height: self.height * rhs.height,
+        }
+    }
+}
+
 
 
 #[derive(Clone, Copy, Debug, PartialEq)]

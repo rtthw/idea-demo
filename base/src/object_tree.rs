@@ -8,7 +8,7 @@ use std::{
     sync::atomic::{AtomicU64, Ordering},
 };
 
-use crate::{CursorIcon, MeasureContext, Object, ObjectState, Point, Size};
+use crate::{CursorIcon, MeasureContext, Object, ObjectState, Point, PointerEvent, Size};
 
 
 
@@ -17,12 +17,7 @@ pub struct ObjectTree {
     root: u64,
     nodes: HashMap<u64, Box<UnsafeCell<ObjectNode>>>,
     parents: HashMap<u64, Option<u64>>,
-    size: Size,
-
-    pub(super) pointer_position: Option<Point>,
-    pub(super) pointer_capture_target: Option<u64>,
-    pub(super) hovered_path: Vec<u64>,
-    pub(super) cursor_icon: CursorIcon,
+    pub(super) interaction: InteractionState,
 }
 
 impl ObjectTree {
@@ -48,11 +43,7 @@ impl ObjectTree {
             root: root_id,
             nodes,
             parents,
-            size: Size::ZERO,
-            pointer_position: None,
-            pointer_capture_target: None,
-            hovered_path: Vec::new(),
-            cursor_icon: CursorIcon::Default,
+            interaction: InteractionState::default(),
         };
 
         crate::update_pass(&mut this);
@@ -80,6 +71,7 @@ impl ObjectTree {
                 parent_id: Some(self.root),
                 all_nodes: &self.nodes,
                 all_parents: &self.parents,
+                interaction: &self.interaction,
             },
         }
     }
@@ -105,6 +97,7 @@ impl ObjectTree {
                 children: &mut node.children,
                 all_nodes: &mut self.nodes,
                 all_parents: &mut self.parents,
+                interaction: &mut self.interaction,
             },
         }
     }
@@ -113,21 +106,21 @@ impl ObjectTree {
     /// [objects](Object) in the tree.
     #[inline]
     pub const fn cursor_icon(&self) -> CursorIcon {
-        self.cursor_icon
+        self.interaction.cursor_icon
     }
 
     /// Get the current [visible size](Size) of the tree.
     #[inline]
     pub const fn size(&self) -> Size {
-        self.size
+        self.interaction.view_size
     }
 
     /// Resize the tree to the provided [size](Size).
     pub fn resize(&mut self, size: Size, measure_context: &mut dyn MeasureContext) {
-        if size == self.size {
+        if size == self.interaction.view_size {
             return;
         }
-        self.size = size;
+        self.interaction.view_size = size;
         crate::layout_pass(self, measure_context);
         crate::update_pass(self);
         crate::compose_pass(self);
@@ -147,6 +140,7 @@ impl ObjectTree {
                 parent_id: Some(id),
                 all_nodes: &self.nodes,
                 all_parents: &self.parents,
+                interaction: &self.interaction,
             },
         })
     }
@@ -166,6 +160,7 @@ impl ObjectTree {
                 children: &mut node.children,
                 all_nodes: &mut self.nodes,
                 all_parents: &mut self.parents,
+                interaction: &mut self.interaction,
             },
         })
     }
@@ -197,19 +192,66 @@ impl ObjectTree {
         path
     }
 
-    pub fn handle_pointer_move(
+    pub fn handle_pointer_event(
         &mut self,
-        position: Option<Point>,
+        event: PointerEvent,
         measure_context: &mut dyn MeasureContext,
     ) {
-        if position == self.pointer_position {
-            return;
+        if let PointerEvent::Move { position } = event {
+            if position == self.interaction.pointer_position {
+                return;
+            }
+            self.interaction.pointer_position = position;
         }
-        self.pointer_position = position;
+
+        let pointer_target = self.get_pointer_target();
+        crate::event_pass(self, pointer_target, |element, pass| {
+            element.on_pointer_event(pass, &event)
+        });
+
+        if matches!(event, PointerEvent::Up { .. }) {
+            self.interaction.pointer_capture_target = None;
+        }
+
         crate::update_pointer_pass(self);
         crate::layout_pass(self, measure_context);
         crate::update_pass(self);
         crate::compose_pass(self);
+    }
+
+    fn get_pointer_target(&self) -> Option<u64> {
+        if let Some(capture_target) = self.interaction.pointer_capture_target
+            && self.find(capture_target).is_some()
+        {
+            return Some(capture_target);
+        }
+
+        if let Some(pointer_pos) = self.interaction.pointer_position {
+            return crate::find_pointer_target(self.root_node(), pointer_pos)
+                .map(|node| node.state.id());
+        }
+
+        None
+    }
+}
+
+pub struct InteractionState {
+    pub(super) view_size: Size,
+    pub(super) pointer_position: Option<Point>,
+    pub(super) pointer_capture_target: Option<u64>,
+    pub(super) hovered_path: Vec<u64>,
+    pub(super) cursor_icon: CursorIcon,
+}
+
+impl Default for InteractionState {
+    fn default() -> Self {
+        Self {
+            view_size: Size::ZERO,
+            pointer_position: None,
+            pointer_capture_target: None,
+            hovered_path: Vec::new(),
+            cursor_icon: CursorIcon::Default,
+        }
     }
 }
 
@@ -237,17 +279,6 @@ impl<'tree> ObjectNodeRef<'tree> {
         }
     }
 }
-
-// impl<'tree> ObjectNodeRef<'tree> {
-//     pub fn reborrow_up(&self) -> ObjectNodeRef<'tree> {
-//         ObjectNodeRef {
-//             parent_id: self.parent_id,
-//             object: self.object,
-//             state: self.state,
-//             children: self.children.reborrow_up(),
-//         }
-//     }
-// }
 
 /// An exclusive (mutable) reference to an [object](Object) instance.
 pub struct ObjectNodeMut<'tree> {
@@ -283,6 +314,7 @@ pub struct ObjectChildrenRef<'tree> {
     parent_id: Option<u64>,
     all_nodes: &'tree HashMap<u64, Box<UnsafeCell<ObjectNode>>>,
     all_parents: &'tree HashMap<u64, Option<u64>>,
+    pub(super) interaction: &'tree InteractionState,
 }
 
 impl<'tree> ObjectChildrenRef<'tree> {
@@ -305,6 +337,7 @@ impl<'tree> ObjectChildrenRef<'tree> {
                 parent_id: Some(id),
                 all_nodes: self.all_nodes,
                 all_parents: self.all_parents,
+                interaction: self.interaction,
             };
 
             Some(ObjectNodeRef {
@@ -323,6 +356,7 @@ impl<'tree> ObjectChildrenRef<'tree> {
             parent_id: self.parent_id,
             all_nodes: self.all_nodes,
             all_parents: self.all_parents,
+            interaction: self.interaction,
         }
     }
 }
@@ -334,6 +368,7 @@ pub struct ObjectChildrenMut<'tree> {
     children: &'tree mut Vec<u64>,
     all_nodes: &'tree mut HashMap<u64, Box<UnsafeCell<ObjectNode>>>,
     all_parents: &'tree mut HashMap<u64, Option<u64>>,
+    pub(super) interaction: &'tree mut InteractionState,
 }
 
 impl ObjectChildrenMut<'_> {
@@ -356,6 +391,7 @@ impl ObjectChildrenMut<'_> {
                 parent_id: Some(id),
                 all_nodes: self.all_nodes,
                 all_parents: self.all_parents,
+                interaction: self.interaction,
             };
 
             Some(ObjectNodeRef {
@@ -383,6 +419,7 @@ impl ObjectChildrenMut<'_> {
                 children,
                 all_nodes: self.all_nodes,
                 all_parents: self.all_parents,
+                interaction: self.interaction,
             };
 
             Some(ObjectNodeMut {
@@ -415,6 +452,7 @@ impl ObjectChildrenMut<'_> {
             parent_id: self.parent_id,
             all_nodes: self.all_nodes,
             all_parents: self.all_parents,
+            interaction: self.interaction,
         }
     }
 
@@ -424,6 +462,7 @@ impl ObjectChildrenMut<'_> {
             children: self.children,
             all_nodes: self.all_nodes,
             all_parents: self.all_parents,
+            interaction: self.interaction,
         }
     }
 }

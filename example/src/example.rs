@@ -86,4 +86,17 @@ impl Object for TestingObject {
     fn cursor_icon(&self) -> CursorIcon {
         CursorIcon::IBeam
     }
+
+    fn on_pointer_event(&mut self, pass: &mut EventPass<'_>, event: &PointerEvent) {
+        match event {
+            PointerEvent::Down { button: _ } => {
+                pass.capture_pointer();
+                pass.set_handled();
+            }
+            PointerEvent::Up { button: _ } => {
+                println!("CLICKED EXAMPLE");
+            }
+            _ => {}
+        }
+    }
 }

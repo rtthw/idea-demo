@@ -57,6 +57,8 @@ pub trait Object: Any {
         CursorIcon::Default
     }
 
+    fn on_pointer_event(&mut self, pass: &mut EventPass<'_>, event: &PointerEvent) {}
+
     fn on_hover(&mut self, pass: &mut EventPass<'_>, hovered: bool) {}
 }
 
@@ -138,6 +140,41 @@ pub enum CursorIcon {
     IBeam,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+#[repr(C)]
+pub enum PointerEvent {
+    Down { button: PointerButton },
+    Up { button: PointerButton },
+    Move { position: Option<Point> },
+    Scroll { delta: ScrollDelta },
+}
+
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[repr(u32)] // TODO: Finish adding the extra pointer buttons (up to button 32).
+pub enum PointerButton {
+    // TODO: Nullable type?
+    Primary = 1,
+    Secondary = 1 << 1,
+    Auxiliary = 1 << 2,
+    Back = 1 << 3,
+    Forward = 1 << 4,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum ScrollDelta {
+    Pixels(Size),
+    Lines(Size),
+}
+
+impl ScrollDelta {
+    pub fn to_pixels(self, line_size: Size) -> Size {
+        match self {
+            Self::Pixels(delta) => delta,
+            ScrollDelta::Lines(delta) => delta * line_size,
+        }
+    }
+}
+
 
 
 pub trait ViewContext {
@@ -206,6 +243,16 @@ pub struct EventPass<'tree> {
     state: &'tree mut ObjectState,
     children: ObjectChildrenMut<'tree>,
     handled: bool,
+}
+
+impl EventPass<'_> {
+    pub fn set_handled(&mut self) {
+        self.handled = true;
+    }
+
+    pub fn capture_pointer(&mut self) {
+        self.children.interaction.pointer_capture_target = Some(self.state.id);
+    }
 }
 
 fn event_pass(
@@ -285,12 +332,13 @@ fn single_event_pass(
 
 fn update_pointer_pass(tree: &mut ObjectTree) {
     let next_hovered_object = tree
+        .interaction
         .pointer_position
         .and_then(|pos| find_pointer_target(tree.root_node(), pos))
         .map(|node| node.state.id());
     let next_hovered_path =
         next_hovered_object.map_or(Vec::new(), |node_id| tree.get_id_path(node_id, None));
-    let prev_hovered_path = std::mem::take(&mut tree.hovered_path);
+    let prev_hovered_path = std::mem::take(&mut tree.interaction.hovered_path);
     let prev_hovered_object = prev_hovered_path.first().copied();
 
     if prev_hovered_path != next_hovered_path {
@@ -342,19 +390,22 @@ fn update_pointer_pass(tree: &mut ObjectTree) {
         });
     }
 
-    let next_cursor_icon =
-        if let Some(node_id) = tree.pointer_capture_target.or(next_hovered_object) {
-            let node = tree
-                .find_mut(node_id)
-                .expect("failed to find the object tree's hover target");
+    let next_cursor_icon = if let Some(node_id) = tree
+        .interaction
+        .pointer_capture_target
+        .or(next_hovered_object)
+    {
+        let node = tree
+            .find_mut(node_id)
+            .expect("failed to find the object tree's hover target");
 
-            node.object.cursor_icon()
-        } else {
-            CursorIcon::Default
-        };
+        node.object.cursor_icon()
+    } else {
+        CursorIcon::Default
+    };
 
-    tree.cursor_icon = next_cursor_icon;
-    tree.hovered_path = next_hovered_path;
+    tree.interaction.cursor_icon = next_cursor_icon;
+    tree.interaction.hovered_path = next_hovered_path;
 }
 
 fn find_pointer_target<'tree>(

@@ -261,8 +261,36 @@ impl Program {
                             continue;
                         }
                         self.known_pointer_position = position;
-                        tree.handle_pointer_move(
-                            position,
+                        tree.handle_pointer_event(
+                            PointerEvent::Move { position },
+                            &mut MeasureContextImpl {
+                                egui_context: ui.ctx(),
+                            },
+                        );
+                    }
+                    egui::Event::PointerButton {
+                        pos,
+                        button,
+                        pressed,
+                        ..
+                    } => {
+                        if !window_rect.contains(pos) {
+                            continue;
+                        }
+                        let button = match button {
+                            egui::PointerButton::Primary => PointerButton::Primary,
+                            egui::PointerButton::Secondary => PointerButton::Secondary,
+                            egui::PointerButton::Middle => PointerButton::Auxiliary,
+                            egui::PointerButton::Extra1 => PointerButton::Back,
+                            egui::PointerButton::Extra2 => PointerButton::Forward,
+                        };
+                        let event = if pressed {
+                            PointerEvent::Down { button }
+                        } else {
+                            PointerEvent::Up { button }
+                        };
+                        tree.handle_pointer_event(
+                            event,
                             &mut MeasureContextImpl {
                                 egui_context: ui.ctx(),
                             },
