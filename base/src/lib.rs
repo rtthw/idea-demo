@@ -41,7 +41,7 @@ pub trait Object: Any {
 
     fn render_overlay(&self, pass: &mut RenderPass<'_>, renderer: &mut dyn Renderer) {}
 
-    fn layout(&mut self, pass: &mut LayoutPass<'_>);
+    fn layout(&mut self, pass: &mut LayoutPass<'_>) {}
 
     fn measure(
         &mut self,

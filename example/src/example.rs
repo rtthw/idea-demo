@@ -71,8 +71,6 @@ impl Object for TestingObject {
         renderer.text("EXAMPLE", pass.position(), 30.0, Rgba::WHITE);
     }
 
-    fn layout(&mut self, _pass: &mut LayoutPass<'_>) {}
-
     fn measure(
         &mut self,
         pass: &mut MeasurePass<'_>,

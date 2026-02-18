@@ -2,9 +2,7 @@
 //!
 //! See [`Label`] for details.
 
-use crate::{
-    Axis, CursorIcon, LayoutPass, LengthRequest, MeasurePass, Object, RenderPass, Renderer, Rgba,
-};
+use crate::{Axis, CursorIcon, LengthRequest, MeasurePass, Object, RenderPass, Renderer, Rgba};
 
 
 
@@ -57,8 +55,6 @@ impl Object for Label {
     fn render(&self, pass: &mut RenderPass<'_>, renderer: &mut dyn Renderer) {
         renderer.text(&self.content, pass.position(), self.font_size, self.color);
     }
-
-    fn layout(&mut self, _pass: &mut LayoutPass<'_>) {}
 
     fn measure(
         &mut self,
