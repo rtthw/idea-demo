@@ -51,6 +51,8 @@ pub trait Object: Any {
         cross_length: Option<f32>,
     ) -> f32;
 
+    fn compose(&mut self, pass: &mut ComposePass<'_>) {}
+
     fn cursor_icon(&self) -> CursorIcon {
         CursorIcon::Default
     }
@@ -62,16 +64,27 @@ pub trait Object: Any {
 pub struct ObjectState {
     id: u64,
 
-    global_position: Point,
+    global_area: Area,
+    global_transform: Affine,
 
     layout_area: Area,
     layout_baseline_offset: f32,
+    local_transform: Affine,
+    scroll_translation: Point,
 
     /// Whether the object needs to be re-laid out.
     needs_layout: bool,
+    /// Whether the object needs to be recomposed onto the screen (i.e. whether
+    /// its global position should be updated).
+    needs_compose: bool,
+    /// Whether the object wants to be recomposed onto the screen (i.e. whether
+    /// [`Object::compose`] should be called).
+    wants_compose: bool,
     /// Whether the object's has had any child added or removed since the last
     /// update pass.
     children_changed: bool,
+    /// Whether this object has been transformed (and therefore needs to ).
+    transformed: bool,
 
     /// Whether this object is hovered by the user's mouse cursor.
     hovered: bool,
@@ -82,14 +95,19 @@ impl ObjectState {
         Self {
             id,
 
-            global_position: Point::ZERO,
+            global_area: Area::ZERO,
+            global_transform: Affine::IDENTITY,
 
             layout_area: Area::ZERO,
             layout_baseline_offset: 0.0,
+            local_transform: Affine::IDENTITY,
+            scroll_translation: Point::ZERO,
 
             needs_layout: true,
+            needs_compose: true,
+            wants_compose: true,
             children_changed: true,
-
+            transformed: true,
             hovered: false,
         }
     }
@@ -101,7 +119,7 @@ impl ObjectState {
 
     #[inline]
     pub const fn area(&self) -> Area {
-        Area::new(self.global_position, self.layout_area.size)
+        self.global_area
     }
 
     fn merge_with_child(&mut self, child_state: &Self) {
@@ -412,6 +430,7 @@ fn layout_object(
     mut node: ObjectNodeMut<'_>,
     size: Size,
 ) {
+    let size = size.round();
     let object = &mut **node.object;
     let state = &mut node.state;
     let children = node.children;
@@ -429,12 +448,16 @@ fn layout_object(
         size,
         context: measure_context,
     });
+
+    state.needs_compose = true;
+    state.wants_compose = true;
 }
 
 fn place_object(state: &mut ObjectState, position: Point) {
-    // if position != state.layout_position {
-    //     state.transformed = true;
-    // }
+    let position = position.round();
+    if position != state.layout_area.position {
+        state.transformed = true;
+    }
 
     state.layout_area.position = position;
 }
@@ -544,6 +567,77 @@ impl Into<Length> for LengthRequest {
 
 
 
+pub struct ComposePass<'tree> {
+    state: &'tree mut ObjectState,
+    children: ObjectChildrenMut<'tree>,
+}
+
+impl ComposePass<'_> {
+    pub fn set_child_scroll(&mut self, child: &mut ChildObject, translation: Point) {
+        let translation = translation.round();
+        let child_state = &mut self
+            .children
+            .get_mut(child.id())
+            .expect("invalid child passed to `ComposePass::set_child_scroll`")
+            .state;
+        if translation != child_state.scroll_translation {
+            child_state.scroll_translation = translation;
+            child_state.transformed = true;
+        }
+    }
+}
+
+pub fn compose_pass(view: &mut ObjectTree) {
+    let node = view.root_node_mut();
+    compose_object(node, Affine::IDENTITY, false);
+}
+
+fn compose_object(
+    mut node: ObjectNodeMut<'_>,
+    parent_global_transform: Affine,
+    parent_transformed: bool,
+) {
+    let object = &mut **node.object;
+    let state = &mut node.state;
+    let mut children = node.children;
+
+    let transformed = parent_transformed || state.transformed;
+
+    if !transformed && !state.needs_compose {
+        return;
+    }
+
+    let local_translation = state.scroll_translation + state.layout_area.position;
+    state.global_transform =
+        parent_global_transform * state.local_transform.with_translation(local_translation);
+    state.global_area = state
+        .global_transform
+        .transform_area(Area::from_size(state.layout_area.size));
+
+    if state.wants_compose {
+        object.compose(&mut ComposePass {
+            state,
+            children: children.reborrow_mut(),
+        });
+    }
+
+    state.needs_compose = false;
+    state.wants_compose = false;
+    state.transformed = false;
+
+    let parent_state = &mut *state;
+    for_each_child_object(object, children, |mut node| {
+        compose_object(
+            node.reborrow_mut(),
+            parent_state.global_transform,
+            transformed,
+        );
+        parent_state.merge_with_child(&node.state);
+    });
+}
+
+
+
 fn for_each_child_object(
     object: &dyn Object,
     mut children: ObjectChildrenMut<'_>,
@@ -572,6 +666,7 @@ macro_rules! multi_impl {
 
 // Types with a `state: &mut ObjectState` field.
 multi_impl! {
+    ComposePass<'_>,
     EventPass<'_>,
     LayoutPass<'_>,
     MeasurePass<'_>,
@@ -585,27 +680,36 @@ multi_impl! {
 
         #[inline]
         pub const fn area(&self) -> Area {
-            Area::new(self.state.global_position, self.state.layout_area.size)
+            self.state.global_area
         }
 
         #[inline]
         pub const fn position(&self) -> Point {
-            self.state.global_position
+            self.state.global_area.position
         }
 
         #[inline]
         pub fn size(&self) -> Size {
-            self.state.layout_area.size
+            self.state.global_area.size
         }
 
+        #[inline]
         pub fn request_layout(&mut self) {
             self.state.needs_layout = true;
         }
+
+        #[inline]
+        pub fn request_compose(&mut self) {
+            self.state.needs_compose = true;
+            self.state.wants_compose = true;
+        }
+
     }
 }
 
 // Types with a `children: ObjectChildrenMut` field.
 multi_impl! {
+    ComposePass<'_>,
     EventPass<'_>,
     LayoutPass<'_>,
     MeasurePass<'_>,

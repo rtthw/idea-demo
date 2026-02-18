@@ -130,6 +130,7 @@ impl ObjectTree {
         self.size = size;
         crate::layout_pass(self, measure_context);
         crate::update_pass(self);
+        crate::compose_pass(self);
     }
 
     /// Get a shared (immutable) reference to the [object](Object) instance with
@@ -208,6 +209,7 @@ impl ObjectTree {
         crate::update_pointer_pass(self);
         crate::layout_pass(self, measure_context);
         crate::update_pass(self);
+        crate::compose_pass(self);
     }
 }
 
