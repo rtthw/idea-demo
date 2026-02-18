@@ -14,8 +14,42 @@ pub extern "Rust" fn view(context: &mut dyn ViewContext) -> Box<dyn Object> {
     let texture_id = context.load_texture("res/light.png");
     Box::new(
         Flex::column()
+            .gap(5.0)
             .with(
-                Label::new("Something").color(Rgba::rgb(0x73, 0x73, 0x89)),
+                Flex::row()
+                    .gap(10.0)
+                    .main_align(AxisAlignment::SpaceEvenly)
+                    .with(
+                        Label::new("2/17/2026, 7:00 AM")
+                            .font_size(12.0)
+                            .color(Rgba::rgb(0x73, 0x73, 0x89)),
+                        0.0,
+                    )
+                    .with(
+                        Label::new("This is a note, or something like that...")
+                            .font_size(18.0)
+                            .color(Rgba::rgb(0xaa, 0xaa, 0xad)),
+                        1.0,
+                    ),
+                0.0,
+            )
+            .with(Label::new("Another").font_size(40.0), 0.0)
+            .with(
+                Flex::row()
+                    .gap(10.0)
+                    .main_align(AxisAlignment::SpaceEvenly)
+                    .with(
+                        Label::new("2/17/2026, 7:01 AM")
+                            .font_size(12.0)
+                            .color(Rgba::rgb(0x73, 0x73, 0x89)),
+                        0.0,
+                    )
+                    .with(
+                        Label::new("And this is another note...")
+                            .font_size(18.0)
+                            .color(Rgba::rgb(0xaa, 0xaa, 0xad)),
+                        1.0,
+                    ),
                 0.0,
             )
             .with(Label::new("Another").font_size(40.0), 0.0)

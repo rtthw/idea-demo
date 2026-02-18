@@ -12,6 +12,7 @@ pub struct Flex {
     main_alignment: AxisAlignment,
     cross_alignment: CrossAlignment,
     elements: Vec<FlexElement>,
+    gap: f32,
 }
 
 enum FlexElement {
@@ -33,22 +34,23 @@ enum FlexElement {
 }
 
 impl Flex {
-    pub fn new(axis: Axis) -> Self {
+    pub const fn new(axis: Axis) -> Self {
         Self {
             axis,
             main_alignment: AxisAlignment::Start,
             cross_alignment: CrossAlignment::Center,
             elements: Vec::new(),
+            gap: 0.0,
         }
     }
 
     #[inline]
-    pub fn row() -> Self {
+    pub const fn row() -> Self {
         Self::new(Axis::Horizontal)
     }
 
     #[inline]
-    pub fn column() -> Self {
+    pub const fn column() -> Self {
         Self::new(Axis::Vertical)
     }
 
@@ -74,12 +76,17 @@ impl Flex {
         self
     }
 
-    pub fn with_main_align(mut self, alignment: AxisAlignment) -> Self {
+    pub const fn gap(mut self, gap: f32) -> Self {
+        self.gap = gap;
+        self
+    }
+
+    pub const fn main_align(mut self, alignment: AxisAlignment) -> Self {
         self.main_alignment = alignment;
         self
     }
 
-    pub fn with_cross_align(mut self, alignment: CrossAlignment) -> Self {
+    pub const fn cross_align(mut self, alignment: CrossAlignment) -> Self {
         self.cross_alignment = alignment;
         self
     }
@@ -90,9 +97,7 @@ impl Object for Flex {
         self.elements
             .iter()
             .filter_map(|element| match element {
-                FlexElement::Child {
-                    object: element, ..
-                } => Some(element.id()),
+                FlexElement::Child { object, .. } => Some(object.id()),
                 FlexElement::Spacer { .. } => None,
             })
             .collect()
@@ -100,18 +105,15 @@ impl Object for Flex {
 
     fn update_children(&mut self, pass: &mut crate::UpdatePass<'_>) {
         for element in self.elements.iter_mut() {
-            let FlexElement::Child {
-                object: element, ..
-            } = element
-            else {
+            let FlexElement::Child { object, .. } = element else {
                 continue;
             };
-            pass.update_child(element);
+            pass.update_child(object);
         }
     }
 
     fn layout(&mut self, pass: &mut LayoutPass<'_>) {
-        let gap_length = 3.0; // self.gap;
+        let gap_length = self.gap;
         let gap_count = self.elements.len().saturating_sub(1);
 
         let size = pass.size;
@@ -337,7 +339,7 @@ impl Object for Flex {
         let perpendicular_axis = measure_axis.cross();
         let main_axis = self.axis;
         let cross_axis = main_axis.cross();
-        let gap_length = 3.0; // self.gap;
+        let gap_length = self.gap;
         let gap_count = self.elements.len().saturating_sub(1);
 
         let (main_space, cross_space) = if perpendicular_axis == main_axis {
@@ -530,11 +532,23 @@ impl Object for Flex {
     }
 }
 
+
+
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct FlexParams {
     flex: f32,
     basis: Option<FlexBasis>,
     alignment: Option<CrossAlignment>,
+}
+
+impl FlexParams {
+    pub const fn new(flex: f32, basis: Option<FlexBasis>, align: Option<CrossAlignment>) -> Self {
+        Self {
+            flex,
+            basis,
+            alignment: align,
+        }
+    }
 }
 
 impl From<f32> for FlexParams {
@@ -546,6 +560,8 @@ impl From<f32> for FlexParams {
         }
     }
 }
+
+
 
 fn effective_basis(basis: Option<FlexBasis>, flex: f32) -> FlexBasis {
     basis.unwrap_or(if flex == 0.0 {
@@ -596,6 +612,8 @@ fn get_spacing(alignment: AxisAlignment, extra: f32, child_count: usize) -> (f32
 
     (space_before, space_between)
 }
+
+
 
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub enum FlexBasis {
