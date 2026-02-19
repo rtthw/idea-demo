@@ -60,6 +60,9 @@ pub trait Object: Any {
     fn on_pointer_event(&mut self, pass: &mut EventPass<'_>, event: &PointerEvent) {}
 
     fn on_hover(&mut self, pass: &mut EventPass<'_>, hovered: bool) {}
+    fn on_focus(&mut self, pass: &mut EventPass<'_>, focused: bool) {}
+    fn on_child_hover(&mut self, pass: &mut EventPass<'_>, hovered: bool) {}
+    fn on_child_focus(&mut self, pass: &mut EventPass<'_>, focused: bool) {}
 }
 
 /// The current state of the [object](Object).
@@ -90,6 +93,8 @@ pub struct ObjectState {
 
     /// Whether this object is hovered by the user's mouse cursor.
     hovered: bool,
+    /// Whether this object has the user's focus.
+    focused: bool,
 }
 
 impl ObjectState {
@@ -111,6 +116,7 @@ impl ObjectState {
             children_changed: true,
             transformed: true,
             hovered: false,
+            focused: false,
         }
     }
 
@@ -253,6 +259,10 @@ impl EventPass<'_> {
     pub fn capture_pointer(&mut self) {
         self.children.interaction.pointer_capture_target = Some(self.state.id);
     }
+
+    pub fn request_focus(&mut self) {
+        self.children.interaction.next_focused_object = Some(self.state.id);
+    }
 }
 
 fn event_pass(
@@ -354,10 +364,10 @@ fn update_pointer_pass(tree: &mut ObjectTree) {
                 .unwrap_or(false)
             {
                 let hovered = hovered_set.contains(&node_id);
-                event_pass(tree, Some(node_id), |_object, pass| {
-                    // if pass.state.hovered != hovered {
-                    //     object.on_child_hover(pass, hovered);
-                    // }
+                event_pass(tree, Some(node_id), |object, pass| {
+                    if pass.state.hovered != hovered {
+                        object.on_child_hover(pass, hovered);
+                    }
                     pass.state.hovered = hovered;
                 });
             }
@@ -369,10 +379,10 @@ fn update_pointer_pass(tree: &mut ObjectTree) {
                 .unwrap_or(false)
             {
                 let hovered = hovered_set.contains(&node_id);
-                event_pass(tree, Some(node_id), |_object, pass| {
-                    // if pass.state.hovered != hovered {
-                    //     object.on_child_hover(pass, hovered);
-                    // }
+                event_pass(tree, Some(node_id), |object, pass| {
+                    if pass.state.hovered != hovered {
+                        object.on_child_hover(pass, hovered);
+                    }
                     pass.state.hovered = hovered;
                 });
             }
@@ -433,6 +443,65 @@ fn find_pointer_target<'tree>(
     } else {
         None
     }
+}
+
+fn update_focus_pass(tree: &mut ObjectTree) {
+    let next_focused_object = tree.interaction.next_focused_object;
+    let next_focused_path = next_focused_object.map_or(Vec::new(), |id| tree.get_id_path(id, None));
+    let prev_focused_path = std::mem::take(&mut tree.interaction.focused_path);
+    let prev_focused_object = prev_focused_path.first().copied();
+
+    if prev_focused_path != next_focused_path {
+        let mut focused_set = HashSet::new();
+        for node_id in &next_focused_path {
+            focused_set.insert(*node_id);
+        }
+
+        for node_id in prev_focused_path.iter().copied() {
+            if tree
+                .find_mut(node_id)
+                .map(|node| node.state.focused != focused_set.contains(&node_id))
+                .unwrap_or(false)
+            {
+                let focused = focused_set.contains(&node_id);
+                event_pass(tree, Some(node_id), |object, pass| {
+                    if pass.state.focused != focused {
+                        object.on_child_focus(pass, focused);
+                    }
+                    pass.state.focused = focused;
+                });
+            }
+        }
+        for node_id in next_focused_path.iter().copied() {
+            if tree
+                .find_mut(node_id)
+                .map(|node| node.state.focused != focused_set.contains(&node_id))
+                .unwrap_or(false)
+            {
+                let focused = focused_set.contains(&node_id);
+                event_pass(tree, Some(node_id), |object, pass| {
+                    if pass.state.focused != focused {
+                        object.on_child_focus(pass, focused);
+                    }
+                    pass.state.focused = focused;
+                });
+            }
+        }
+    }
+
+    if prev_focused_object != next_focused_object {
+        single_event_pass(tree, prev_focused_object, |object, pass| {
+            pass.state.focused = false;
+            object.on_focus(pass, false);
+        });
+        single_event_pass(tree, next_focused_object, |object, pass| {
+            pass.state.focused = true;
+            object.on_focus(pass, true);
+        });
+    }
+
+    tree.interaction.focused_object = next_focused_object;
+    tree.interaction.focused_path = next_focused_path;
 }
 
 

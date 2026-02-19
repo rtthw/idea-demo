@@ -197,6 +197,7 @@ impl ObjectTree {
         event: PointerEvent,
         measure_context: &mut dyn MeasureContext,
     ) {
+        // Update the pointer position.
         if let PointerEvent::Move { position } = event {
             if position == self.interaction.pointer_position {
                 return;
@@ -205,17 +206,34 @@ impl ObjectTree {
         }
 
         let pointer_target = self.get_pointer_target();
-        crate::event_pass(self, pointer_target, |element, pass| {
-            element.on_pointer_event(pass, &event)
+
+        // Clear the focus if the user clicked outside the focused object.
+        if matches!(event, PointerEvent::Down { .. })
+            && let Some(target_id) = pointer_target
+        {
+            if let Some(id) = self.interaction.focused_object {
+                // Focused object isn't an ancestor of the pointer target.
+                if !self.get_id_path(target_id, None).contains(&id) {
+                    self.interaction.next_focused_object = None;
+                }
+            }
+        }
+
+        // Run the event pass.
+        crate::event_pass(self, pointer_target, |object, pass| {
+            object.on_pointer_event(pass, &event)
         });
 
+        // Remove the pointer capture target on click up.
         if matches!(event, PointerEvent::Up { .. }) {
             self.interaction.pointer_capture_target = None;
         }
 
-        crate::update_pointer_pass(self);
-        crate::layout_pass(self, measure_context);
+        // Run the update passes.
         crate::update_pass(self);
+        crate::update_pointer_pass(self);
+        crate::update_focus_pass(self);
+        crate::layout_pass(self, measure_context);
         crate::compose_pass(self);
     }
 
@@ -239,7 +257,10 @@ pub struct InteractionState {
     pub(super) view_size: Size,
     pub(super) pointer_position: Option<Point>,
     pub(super) pointer_capture_target: Option<u64>,
+    pub(super) focused_object: Option<u64>,
+    pub(super) next_focused_object: Option<u64>,
     pub(super) hovered_path: Vec<u64>,
+    pub(super) focused_path: Vec<u64>,
     pub(super) cursor_icon: CursorIcon,
 }
 
@@ -249,7 +270,10 @@ impl Default for InteractionState {
             view_size: Size::ZERO,
             pointer_position: None,
             pointer_capture_target: None,
+            focused_object: None,
+            next_focused_object: None,
             hovered_path: Vec::new(),
+            focused_path: Vec::new(),
             cursor_icon: CursorIcon::Default,
         }
     }

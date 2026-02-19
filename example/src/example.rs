@@ -57,22 +57,34 @@ pub extern "Rust" fn view(context: &mut dyn ViewContext) -> Box<dyn Object> {
                 0.0,
             )
             .with(Label::new("Another").font_size(40.0), 0.0)
-            .with(TestingObject { texture_id }, 0.0)
-            .with(TestingObject { texture_id }, 0.0),
+            .with(TestingObject::new(texture_id), 0.0)
+            .with(TestingObject::new(texture_id), 0.0),
     )
 }
 
 
 
 struct TestingObject {
+    color: Rgba,
+    font_size: f32,
     texture_id: u64,
+}
+
+impl TestingObject {
+    fn new(texture_id: u64) -> Self {
+        Self {
+            color: Rgba::rgb(0x73, 0x73, 0x89),
+            font_size: 30.0,
+            texture_id,
+        }
+    }
 }
 
 impl Object for TestingObject {
     fn render(&self, pass: &mut RenderPass<'_>, renderer: &mut dyn Renderer) {
-        renderer.quad(pass.position(), pass.size(), Rgba::BLACK);
+        // renderer.quad(pass.position(), pass.size(), Rgba::BLACK);
         renderer.image(self.texture_id, pass.position(), pass.size());
-        renderer.text("EXAMPLE", pass.position(), 30.0, Rgba::WHITE);
+        renderer.text("EXAMPLE", pass.position(), self.font_size, self.color);
     }
 
     fn measure(
@@ -83,7 +95,7 @@ impl Object for TestingObject {
         _cross_length: Option<f32>,
     ) -> f32 {
         pass.measure_context()
-            .text_size("EXAMPLE", 30.0)
+            .text_size("EXAMPLE", self.font_size)
             .value_for_axis(axis)
     }
 
@@ -93,14 +105,37 @@ impl Object for TestingObject {
 
     fn on_pointer_event(&mut self, pass: &mut EventPass<'_>, event: &PointerEvent) {
         match event {
-            PointerEvent::Down { button: _ } => {
+            PointerEvent::Down {
+                button: PointerButton::Primary,
+            } => {
                 pass.capture_pointer();
                 pass.set_handled();
             }
-            PointerEvent::Up { button: _ } => {
-                println!("CLICKED EXAMPLE");
+            PointerEvent::Up {
+                button: PointerButton::Primary,
+            } => {
+                pass.request_focus();
             }
             _ => {}
         }
+    }
+
+    fn on_hover(&mut self, pass: &mut EventPass<'_>, hovered: bool) {
+        if hovered {
+            self.color = Rgba::rgb(0xaa, 0xaa, 0xad);
+        } else {
+            self.color = Rgba::rgb(0x73, 0x73, 0x89);
+        }
+        pass.set_handled();
+    }
+
+    fn on_focus(&mut self, pass: &mut EventPass<'_>, focused: bool) {
+        if focused {
+            self.font_size *= 1.2;
+        } else {
+            self.font_size /= 1.2;
+        }
+        pass.set_handled();
+        pass.request_layout();
     }
 }
