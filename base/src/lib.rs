@@ -43,6 +43,19 @@ pub trait Object: Any {
 
     fn layout(&mut self, pass: &mut LayoutPass<'_>) {}
 
+    // Reduce boilerplate required for tests.
+    #[cfg(test)]
+    fn measure(
+        &mut self,
+        pass: &mut MeasurePass<'_>,
+        axis: Axis,
+        length_request: LengthRequest,
+        cross_length: Option<f32>,
+    ) -> f32 {
+        0.0
+    }
+
+    #[cfg(not(test))]
     fn measure(
         &mut self,
         pass: &mut MeasurePass<'_>,
@@ -56,6 +69,24 @@ pub trait Object: Any {
     fn cursor_icon(&self) -> CursorIcon {
         CursorIcon::Default
     }
+
+    /// Called when this object is first added to the [tree](ObjectTree).
+    ///
+    /// For objects with children, this method is called *before* child
+    /// initialization.
+    ///
+    /// For objects without children, this will be called immediately before
+    /// [`ready`](Object::ready).
+    fn init(&mut self, pass: &mut UpdatePass<'_>) {}
+
+    /// Called when this object is first added to the [tree](ObjectTree).
+    ///
+    /// For objects with children, this method is called *after* all children
+    /// have been initialized.
+    ///
+    /// For objects without children, this will be called immediately after
+    /// [`init`](Object::init).
+    fn ready(&mut self, pass: &mut UpdatePass<'_>) {}
 
     fn on_pointer_event(&mut self, pass: &mut EventPass<'_>, event: &PointerEvent) {}
 
@@ -77,6 +108,9 @@ pub struct ObjectState {
     local_transform: Affine,
     scroll_translation: Point,
 
+    /// Whether the object was just instantiated. This is `true` until the
+    /// [update pass](update_pass) is next called after instantiation.
+    newly_instantiated: bool,
     /// Whether the object needs to be re-laid out.
     needs_layout: bool,
     /// Whether the object needs to be recomposed onto the screen (i.e. whether
@@ -110,6 +144,7 @@ impl ObjectState {
             local_transform: Affine::IDENTITY,
             scroll_translation: Point::ZERO,
 
+            newly_instantiated: true,
             needs_layout: true,
             needs_compose: true,
             wants_compose: true,
@@ -228,19 +263,26 @@ fn update_object_tree(mut node: ObjectNodeMut<'_>) {
         children: children.reborrow_mut(),
     });
 
-    // if state.newly_instantiated {
-    //     state.newly_instantiated = false;
-    //     object.on_ready(&mut UpdatePass {
-    //         state,
-    //         children: children.reborrow_mut(),
-    //     });
-    // }
+    if state.newly_instantiated {
+        object.init(&mut UpdatePass {
+            state,
+            children: children.reborrow_mut(),
+        });
+    }
 
     let parent_state = &mut *state;
-    for_each_child_object(object, children, |mut node| {
+    for_each_child_object(object, children.reborrow_mut(), |mut node| {
         update_object_tree(node.reborrow_mut());
         parent_state.merge_with_child(&node.state);
     });
+
+    if state.newly_instantiated {
+        state.newly_instantiated = false;
+        object.ready(&mut UpdatePass {
+            state,
+            children: children,
+        });
+    }
 }
 
 

@@ -556,3 +556,113 @@ impl ObjectBuilder {
         }
     }
 }
+
+
+
+#[cfg(test)]
+mod tests {
+    use std::sync::atomic::{AtomicU32, Ordering};
+
+    use super::*;
+
+    #[test]
+    fn init_and_ready_ordering() {
+        static INIT_NUM: AtomicU32 = AtomicU32::new(0);
+        static READY_NUM: AtomicU32 = AtomicU32::new(0);
+
+        struct A {
+            b: ChildObject,
+            d: ChildObject,
+        }
+
+        impl Object for A {
+            fn children_ids(&self) -> Vec<u64> {
+                vec![self.b.id(), self.d.id()]
+            }
+
+            fn update_children(&mut self, pass: &mut crate::UpdatePass<'_>) {
+                assert!(!self.b.exists());
+                assert!(!self.d.exists());
+                pass.update_child(&mut self.b);
+                pass.update_child(&mut self.d);
+                assert!(self.b.exists());
+                assert!(self.d.exists());
+            }
+
+            fn init(&mut self, _pass: &mut crate::UpdatePass<'_>) {
+                let prev_init_num = INIT_NUM.fetch_add(1, Ordering::SeqCst);
+                assert_eq!(prev_init_num, 0);
+            }
+
+            fn ready(&mut self, _pass: &mut crate::UpdatePass<'_>) {
+                let prev_ready_num = READY_NUM.fetch_add(1, Ordering::SeqCst);
+                assert_eq!(prev_ready_num, 3);
+            }
+        }
+
+        struct B {
+            c: ChildObject,
+        }
+
+        impl Object for B {
+            fn children_ids(&self) -> Vec<u64> {
+                vec![self.c.id()]
+            }
+
+            fn update_children(&mut self, pass: &mut crate::UpdatePass<'_>) {
+                assert!(!self.c.exists());
+                pass.update_child(&mut self.c);
+                assert!(self.c.exists());
+            }
+
+            fn init(&mut self, _pass: &mut crate::UpdatePass<'_>) {
+                let prev_init_num = INIT_NUM.fetch_add(1, Ordering::SeqCst);
+                assert_eq!(prev_init_num, 1);
+            }
+
+            fn ready(&mut self, _pass: &mut crate::UpdatePass<'_>) {
+                let prev_ready_num = READY_NUM.fetch_add(1, Ordering::SeqCst);
+                assert_eq!(prev_ready_num, 1);
+            }
+        }
+
+        struct C;
+        impl Object for C {
+            fn init(&mut self, _pass: &mut crate::UpdatePass<'_>) {
+                let prev_init_num = INIT_NUM.fetch_add(1, Ordering::SeqCst);
+                assert_eq!(prev_init_num, 2);
+            }
+
+            fn ready(&mut self, _pass: &mut crate::UpdatePass<'_>) {
+                let prev_ready_num = READY_NUM.fetch_add(1, Ordering::SeqCst);
+                assert_eq!(prev_ready_num, 0);
+            }
+        }
+
+        struct D;
+        impl Object for D {
+            fn init(&mut self, _pass: &mut crate::UpdatePass<'_>) {
+                let prev_init_num = INIT_NUM.fetch_add(1, Ordering::SeqCst);
+                assert_eq!(prev_init_num, 3);
+            }
+
+            fn ready(&mut self, _pass: &mut crate::UpdatePass<'_>) {
+                let prev_ready_num = READY_NUM.fetch_add(1, Ordering::SeqCst);
+                assert_eq!(prev_ready_num, 2);
+            }
+        }
+
+        // Will call `init` ({) and `ready` (}) methods in this order:
+        //      A { B { C {} } D {} }
+        let _tree = ObjectTree::new(Box::new(A {
+            b: ObjectBuilder::new(B {
+                c: ObjectBuilder::new(C).into_child(),
+            })
+            .into_child(),
+            d: ObjectBuilder::new(D).into_child(),
+        }));
+
+        assert_eq!(INIT_NUM.load(Ordering::SeqCst), 4);
+        assert_eq!(READY_NUM.load(Ordering::SeqCst), 4);
+    }
+}
